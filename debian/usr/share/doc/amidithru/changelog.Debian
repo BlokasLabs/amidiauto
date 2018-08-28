@@ -1,0 +1,5 @@
+amidithru (1.0-1) jessie; urgency=medium
+
+  * Initial .deb package release.
+
+ -- Giedrius Trainavičius <giedrius@blokas.io> Wed, 29 Aug 2018 02:45:10 +0200
