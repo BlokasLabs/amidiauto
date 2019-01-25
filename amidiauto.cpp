@@ -1,6 +1,6 @@
 /*
- * amidithru - user mode ALSA MIDI thru port.
- * Copyright (C) 2018  Vilniaus Blokas UAB, https://blokas.io/
+ * amidiauto - ALSA MIDI autoconnect daemon.
+ * Copyright (C) 2019  Vilniaus Blokas UAB, https://blokas.io/
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License

@@ -1,5 +1,5 @@
-# amidithru - user mode ALSA MIDI thru port.
-# Copyright (C) 2018  Vilniaus Blokas UAB, https://blokas.io/
+# amidiauto - ALSA MIDI autoconnect daemon.
+# Copyright (C) 2019  Vilniaus Blokas UAB, https://blokas.io/
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -18,14 +18,14 @@
 
 BINARY_DIR ?= /usr/local/bin
 
-all: amidithru
+all: amidiauto
 
 CXXFLAGS ?= -O3
 LDFLAGS ?= -lasound
 
 CXX=g++-4.9
 
-amidithru: amidithru.o
+amidiauto: amidiauto.o
 	$(CXX) $^ -o $@ $(LDFLAGS)
 	strip $@
 
@@ -33,18 +33,18 @@ amidithru: amidithru.o
 	$(CXX) -c $(CXXFLAGS) $^ -o $@
 
 install: all
-	@cp -p amidithru $(BINARY_DIR)/
+	@cp -p amidiauto $(BINARY_DIR)/
 
 clean:
-	rm -f amidithru *.o
-	rm -f amidithru.deb
-	rm -f debian/usr/bin/amidithru
+	rm -f amidiauto *.o
+	rm -f amidiauto.deb
+	rm -f debian/usr/bin/amidiauto
 	gunzip `find . | grep gz` > /dev/null 2>&1 || true
 
-amidithru.deb: amidithru
-	@gzip --best -n ./debian/usr/share/doc/amidithru/changelog ./debian/usr/share/doc/amidithru/changelog.Debian ./debian/usr/share/man/man1/amidithru.1
+amidiauto.deb: amidiauto
+	@gzip --best -n ./debian/usr/share/doc/amidiauto/changelog ./debian/usr/share/doc/amidiauto/changelog.Debian ./debian/usr/share/man/man1/amidiauto.1
 	@mkdir -p debian/usr/bin
-	@cp -p amidithru debian/usr/bin/
+	@cp -p amidiauto debian/usr/bin/
 	@fakeroot dpkg --build debian
-	@mv debian.deb amidithru.deb
+	@mv debian.deb amidiauto.deb
 	@gunzip `find . | grep gz` > /dev/null 2>&1
