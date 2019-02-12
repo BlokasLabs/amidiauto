@@ -1,0 +1,10 @@
+[Unit]
+Description=ALSA MIDI autoconnect daemon
+After=sound.target
+
+[Service]
+ExecStart=/usr/bin/amidiauto
+
+[Install]
+WantedBy=multi-user.target
+

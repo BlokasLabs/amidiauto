@@ -1,5 +1,5 @@
-amidithru (1.0-1) jessie; urgency=medium
+amidiauto (1.0-1) jessie; urgency=medium
 
 * Initial .deb package release.
 
--- Giedrius Trainavičius <giedrius@blokas.io> Wed, 29 Aug 2018 02:45:10 +0200
+-- Giedrius Trainavičius <giedrius@blokas.io> Tue, 12 Feb 2019 16:45:10 +0200

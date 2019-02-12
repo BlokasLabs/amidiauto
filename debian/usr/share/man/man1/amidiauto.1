@@ -1,12 +1,16 @@
-.TH amidithru 1
+.TH amidiauto 1
 .SH NAME
-amidithru \- user mode ALSA MIDI thru port. (see https://github.com/BlokasLabs/amidithru/ for more information).
+amidiauto \- ALSA MIDI autoconnect daemon.
 .SH SYNOPSIS
-.B amidithru VirtualPortName
+.B amidiauto
 
 Example:
 
-amidithru  "Virtual Thru"
+amidiauto
 .SH DESCRIPTION
-.B amidithru
-User mode ALSA MIDI thru port.
+.B amidiauto
+ALSA MIDI autoconnect daemon.
+
+Automatically detects port changes, and makes the connection between the software and hardware MIDI ports. If software or hardware provides more than one input and one output port, only the first ones get connected.
+
+See https://github.com/BlokasLabs/amidiauto/ for more information.

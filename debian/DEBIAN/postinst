@@ -1,0 +1,7 @@
+# Automatically added by dh_installinit
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ]; then
+	systemctl enable amidiauto
+	systemctl start amidiauto
+fi
+# End automatically added section
+
