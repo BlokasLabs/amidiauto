@@ -232,6 +232,21 @@ static bool portAdd(const snd_seq_port_info_t &portInfo)
 	if (caps & SND_SEQ_PORT_CAP_NO_EXPORT)
 		return false;
 
+	// Ignore System client and its Announce and Timer ports.
+	int clientId = snd_seq_port_info_get_client(&portInfo);
+	if (clientId == SND_SEQ_CLIENT_SYSTEM)
+		return false;
+
+	snd_seq_client_info_t *clientInfo;
+	snd_seq_client_info_alloca(&clientInfo);
+	if (snd_seq_get_any_client_info(g_seq, clientId, clientInfo) < 0)
+		return false;
+
+	// Ignore through ports.
+	const char *name = snd_seq_client_info_get_name(clientInfo);
+	if (!name || strncmp(name, "Midi Through", 12) == 0)
+		return false;
+
 	unsigned int type = snd_seq_port_info_get_type(&portInfo);
 	clients_t &list = (type & SND_SEQ_PORT_TYPE_APPLICATION) ? g_swClients : g_hwClients;
 	snd_seq_addr_t addr = *snd_seq_port_info_get_addr(&portInfo);
@@ -318,14 +333,6 @@ static int portsInit()
 	while (snd_seq_query_next_client(g_seq, clientInfo) >= 0)
 	{
 		int clientId = snd_seq_client_info_get_client(clientInfo);
-
-		// Ignore System client and its Announce and Timer ports.
-		if (clientId == SND_SEQ_CLIENT_SYSTEM)
-			continue;
-
-		const char *name = snd_seq_client_info_get_name(clientInfo);
-		if (!name || strncmp(name, "Midi Through", 12) == 0)
-			continue;
 
 		snd_seq_port_info_set_client(portInfo, clientId);
 		snd_seq_port_info_set_port(portInfo, -1);
@@ -459,7 +466,6 @@ static bool handleSeqEvent(snd_seq_t *seq, int port)
 				{
 					fprintf(stderr, "Failed getting port %d:%d info: %d\n", ev->data.addr.client, ev->data.addr.port, result);
 				}
-				
 			}
 			break;
 		case SND_SEQ_EVENT_PORT_EXIT:
