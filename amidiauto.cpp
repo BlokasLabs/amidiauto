@@ -41,6 +41,12 @@ enum PortDir
 	DIR_DUPLEX  = DIR_INPUT | DIR_OUTPUT
 };
 
+enum PortType
+{
+	TYPE_SOFTWARE = 0,
+	TYPE_HARDWARE = 1,
+};
+
 inline static bool operator <(const snd_seq_addr_t &a, const snd_seq_addr_t &b)
 {
 	return std::make_pair(a.client, a.port) < std::make_pair(b.client, b.port);
@@ -225,6 +231,21 @@ static PortDir portGetDir(const snd_seq_port_info_t &portInfo)
 	return (PortDir)result;
 }
 
+static PortType portGetType(const snd_seq_port_info_t &portInfo)
+{
+	const char *name = snd_seq_port_info_get_name(&portInfo);
+
+	if (strncmp("TouchOSC Bridge", name, 15) == 0)
+	{
+		// Treat touchosc2midi ports as 'hardware' ones.
+		return TYPE_HARDWARE;
+	}
+
+	unsigned int type = snd_seq_port_info_get_type(&portInfo);
+
+	return (type & SND_SEQ_PORT_TYPE_APPLICATION) ? TYPE_SOFTWARE : TYPE_HARDWARE;
+}
+
 static bool portAdd(const snd_seq_port_info_t &portInfo)
 {
 	unsigned int caps = snd_seq_port_info_get_capability(&portInfo);
@@ -247,13 +268,14 @@ static bool portAdd(const snd_seq_port_info_t &portInfo)
 	if (!name || strncmp(name, "Midi Through", 12) == 0)
 		return false;
 
-	unsigned int type = snd_seq_port_info_get_type(&portInfo);
-	clients_t &list = (type & SND_SEQ_PORT_TYPE_APPLICATION) ? g_swClients : g_hwClients;
-	snd_seq_addr_t addr = *snd_seq_port_info_get_addr(&portInfo);
+	PortType type = portGetType(portInfo);
+	clients_t &list = (type == TYPE_SOFTWARE) ? g_swClients : g_hwClients;
 
 	PortDir dir = portGetDir(portInfo);
 
 	bool gotAdded = false;
+
+	snd_seq_addr_t addr = *snd_seq_port_info_get_addr(&portInfo);
 
 	Client &client = getClient(list, addr.client);
 	if (dir & DIR_OUTPUT)

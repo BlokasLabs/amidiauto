@@ -33,6 +33,7 @@ amidiauto: amidiauto.o
 	$(CXX) -c $(CXXFLAGS) $^ -o $@
 
 install: all
+	@systemctl stop amidiauto > /dev/null 2>&1 || true
 	@cp -p amidiauto $(BINARY_DIR)/
 	@cp -p amidiauto.service /usr/lib/systemd/system/
 	@systemctl daemon-reload > /dev/null 2>&1
