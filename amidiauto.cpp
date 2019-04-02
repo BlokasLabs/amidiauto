@@ -26,9 +26,10 @@
 #include <poll.h>
 
 #include <map>
+#include <set>
 
 #define HOMEPAGE_URL "https://blokas.io/"
-#define AMIDIAUTO_VERSION 0x0100
+#define AMIDIAUTO_VERSION 0x0101
 
 static snd_seq_t *g_seq = NULL;
 static int g_port = -1;
@@ -56,6 +57,130 @@ inline static bool operator ==(const snd_seq_addr_t &a, const snd_seq_addr_t &b)
 {
 	return a.client == b.client && a.port == b.port;
 }
+
+static std::string getClientName(snd_seq_addr_t addr)
+{
+	snd_seq_client_info_t *clientInfo;
+	snd_seq_client_info_alloca(&clientInfo);
+	if (snd_seq_get_any_client_info(g_seq, addr.client, clientInfo) < 0)
+		return "";
+
+	const char *name = snd_seq_client_info_get_name(clientInfo);
+
+	return name ? name : "";
+}
+
+class ConnectionRules
+{
+public:
+	enum Type
+	{
+		TYPE_ALLOW    = 0,
+		TYPE_DISALLOW = 1,
+	};
+
+	enum Strength
+	{
+		STRENGTH_NONE       = 0, // Rule does not apply.
+		STRENGTH_VERY_VAGUE = 1, // Wildcard matched wildcard.
+		STRENGTH_VAGUE      = 2, // One of the sides is a specific name, the other is a wildcard.
+		STRENGTH_SPECIFIC   = 3, // Both sides is a specific name.
+	};
+
+	void addRule(Type type, const char *output, const char *input);
+
+	bool hasRules() const;
+
+	bool isConnectionAllowed(snd_seq_addr_t output, snd_seq_addr_t input, Strength minimumStrength) const;
+
+private:
+	typedef std::pair<std::string, std::string> rule_t;
+	typedef std::multimap<std::string, std::string> rules_t;
+
+	Strength evaluate(const rules_t &rules, snd_seq_addr_t output, snd_seq_addr_t input) const;
+	static Strength evaluate(const rule_t &rule, const std::string &outputName, const std::string &inputName);
+
+	rules_t m_allowRules;
+	rules_t m_disallowRules;
+};
+
+void ConnectionRules::addRule(Type type, const char * output, const char * input)
+{
+	if (!output || !input)
+		return;
+
+	if (strchr(output, '*') != NULL && strlen(output) > 1)
+		return;
+
+	if (strchr(input, '*') != NULL && strlen(input) > 1)
+		return;
+
+	rules_t &rules = type == TYPE_ALLOW ? m_allowRules : m_disallowRules;
+
+	fprintf(stderr, "Adding %s -> %s %s rule.\n", output, input, type == TYPE_ALLOW ? "allow" : "disallow");
+
+	rules.insert(std::make_pair(output, input));
+}
+
+bool ConnectionRules::hasRules() const
+{
+	return !m_allowRules.empty() || !m_disallowRules.empty();
+}
+
+bool ConnectionRules::isConnectionAllowed(snd_seq_addr_t output, snd_seq_addr_t input, Strength minimumStrength) const
+{
+	Strength allowStrength = evaluate(m_allowRules, output, input);
+	Strength disallowStrength = evaluate(m_disallowRules, output, input);
+
+	return allowStrength >= minimumStrength && allowStrength >= disallowStrength;
+}
+
+ConnectionRules::Strength ConnectionRules::evaluate(const rules_t &rules, snd_seq_addr_t output, snd_seq_addr_t input) const
+{
+	std::string outputName = getClientName(output);
+	std::string inputName = getClientName(input);
+
+	Strength strength = STRENGTH_NONE;
+
+	for (rules_t::const_iterator itr = rules.begin(); itr != rules.end(); ++itr)
+	{
+		Strength s = evaluate(*itr, outputName, inputName);
+		if (strength < s)
+			strength = s;
+	}
+
+	return strength;
+}
+
+ConnectionRules::Strength ConnectionRules::evaluate(const rule_t & rule, const std::string &outputName, const std::string &inputName)
+{
+	if (rule.first == "*")
+	{
+		if (rule.second == "*")
+		{
+			return STRENGTH_VERY_VAGUE;
+		}
+		else if (inputName.find(rule.second) != std::string::npos)
+		{
+			return STRENGTH_VAGUE;
+		}
+	}
+	else if (outputName.find(rule.first) != std::string::npos)
+	{
+		if (rule.second == "*")
+		{
+			return STRENGTH_VAGUE;
+		}
+		else if (inputName.find(rule.second) != std::string::npos)
+		{
+			return STRENGTH_SPECIFIC;
+		}
+	}
+
+	return STRENGTH_NONE;
+}
+
+static ConnectionRules g_rules;
 
 // Keeps track of one input and one output port.
 // This is to try and keep things simple and app performance under control.
@@ -324,22 +449,76 @@ static void portAutoConnect(snd_seq_addr_t addr, PortDir dir)
 	if (!client)
 		return;
 
-	clients_t &list = type == CLIENT_SOFTWARE ? g_hwClients : g_swClients;
-
-	for (clients_t::iterator itr = list.begin(); itr != list.end(); ++itr)
+	clients_t *lists[2] = { &g_swClients, &g_hwClients };
+	ConnectionRules::Strength strengths[2] =
 	{
-		Client &client = itr->second;
+		type == CLIENT_SOFTWARE ? ConnectionRules::STRENGTH_SPECIFIC : ConnectionRules::STRENGTH_VERY_VAGUE,
+		type == CLIENT_SOFTWARE ? ConnectionRules::STRENGTH_VERY_VAGUE : ConnectionRules::STRENGTH_SPECIFIC
+	};
 
-		const snd_seq_addr_t *input = client.getInput();
-		const snd_seq_addr_t *output = client.getOutput();
+	for (int i=0; i<2; ++i)
+	{
+		clients_t &list = *lists[i];
+		ConnectionRules::Strength strength = strengths[i];
 
-		if ((dir & DIR_INPUT) && output)
+		for (clients_t::iterator itr = list.begin(); itr != list.end(); ++itr)
 		{
-			connect(*output, addr);
+			Client &client = itr->second;
+
+			const snd_seq_addr_t *input = client.getInput();
+			const snd_seq_addr_t *output = client.getOutput();
+
+			if ((dir & DIR_INPUT) && output)
+			{
+				if (g_rules.isConnectionAllowed(*output, addr, strength))
+					connect(*output, addr);
+			}
+			if (dir & DIR_OUTPUT && input)
+			{
+				if (g_rules.isConnectionAllowed(addr, *input, strength))
+					connect(addr, *input);
+			}
 		}
-		if (dir & DIR_OUTPUT && input)
+	}
+}
+
+static void portsConnectAll(const clients_t &listA, const clients_t &listB, ConnectionRules::Strength minimumStrength)
+{
+	std::set<std::pair<snd_seq_addr_t, snd_seq_addr_t> > handled;
+
+	for (clients_t::const_iterator listAItr = listA.begin(); listAItr != listA.end(); ++listAItr)
+	{
+		const Client &aClient = listAItr->second;
+
+		const snd_seq_addr_t *aInput = aClient.getInput();
+		const snd_seq_addr_t *aOutput = aClient.getOutput();
+
+		if (!aInput && !aOutput)
+			continue;
+
+		for (clients_t::const_iterator listBItr = listB.begin(); listBItr != listB.end(); ++listBItr)
 		{
-			connect(addr, *input);
+			const Client &bClient = listBItr->second;
+
+			const snd_seq_addr_t *bInput = bClient.getInput();
+			const snd_seq_addr_t *bOutput = bClient.getOutput();
+
+			if (bInput && aOutput && handled.find(std::make_pair(*aOutput, *bInput)) == handled.end())
+			{
+				if (g_rules.isConnectionAllowed(*aOutput, *bInput, minimumStrength))
+				{
+					connect(*aOutput, *bInput);
+					handled.insert(std::make_pair(*aOutput, *bInput));
+				}
+			}
+			if (bOutput && aInput && handled.find(std::make_pair(*bOutput, *aInput)) == handled.end())
+			{
+				if (g_rules.isConnectionAllowed(*bOutput, *aInput, minimumStrength))
+				{
+					connect(*bOutput, *aInput);
+					handled.insert(std::make_pair(*bOutput, *aInput));
+				}
+			}
 		}
 	}
 }
@@ -366,33 +545,9 @@ static int portsInit()
 	}
 
 	// Initially connect everything together.
-	for (clients_t::const_iterator hwClientItr = g_hwClients.begin(); hwClientItr != g_hwClients.end(); ++hwClientItr)
-	{
-		const Client &hwClient = hwClientItr->second;
-
-		const snd_seq_addr_t *hwInput = hwClient.getInput();
-		const snd_seq_addr_t *hwOutput = hwClient.getOutput();
-
-		if (!hwInput && !hwOutput)
-			continue;
-
-		for (clients_t::const_iterator swClientItr = g_swClients.begin(); swClientItr != g_swClients.end(); ++swClientItr)
-		{
-			const Client &swClient = swClientItr->second;
-
-			const snd_seq_addr_t *swInput = swClient.getInput();
-			const snd_seq_addr_t *swOutput = swClient.getOutput();
-
-			if (swInput && hwOutput)
-			{
-				connect(*hwOutput, *swInput);
-			}
-			if (swOutput && hwInput)
-			{
-				connect(*swOutput, *hwInput);
-			}
-		}
-	}
+	portsConnectAll(g_hwClients, g_swClients, ConnectionRules::STRENGTH_VERY_VAGUE);
+	portsConnectAll(g_hwClients, g_hwClients, ConnectionRules::STRENGTH_SPECIFIC);
+	portsConnectAll(g_swClients, g_swClients, ConnectionRules::STRENGTH_SPECIFIC);
 }
 
 static void seqUninit()
@@ -520,7 +675,7 @@ static int run()
 	npfd = snd_seq_poll_descriptors_count(g_seq, POLLIN);
 	if (npfd != 1)
 	{
-		fprintf(stderr, "Unexpected count (%d) of seq fds! Expected 1!", npfd);
+		fprintf(stderr, "Unexpected count (%d) of seq fds! Expected 1!\n", npfd);
 		result = -EINVAL;
 		goto cleanup;
 	}
@@ -564,6 +719,116 @@ static void printUsage()
 	printVersion();
 }
 
+static char *trimWhiteSpace(char *str)
+{
+	char *end = strchr(str, '\0')-1;
+
+	while (end > str && isspace(*end))
+		--end;
+
+	*(end+1) = '\0';
+
+	while (isspace(*str))
+		++str;
+
+	return str;
+}
+
+static bool parseRuleFile(ConnectionRules &rules, const char *fileName)
+{
+	if (!fileName)
+		return false;
+
+	FILE *f = fopen(fileName, "rt");
+	if (!f)
+	{
+		fprintf(stderr, "Opening '%s' failed!\n", fileName);
+		return false;
+	}
+
+	enum { MAX_LENGTH = 1024 };
+	char l[MAX_LENGTH];
+
+	unsigned int i=0;
+
+	ConnectionRules::Type type = ConnectionRules::TYPE_ALLOW;
+
+	while (!feof(f) && fgets(l, MAX_LENGTH, f) != NULL)
+	{
+		char *commentMarker = strchr(l, '#');
+		if (commentMarker)
+			*commentMarker = '\0'; // Cut the string at the beginning of a comment.
+
+		char *line = trimWhiteSpace(l);
+
+		if (strcmp(line, "[allow]") == 0)
+		{
+			type = ConnectionRules::TYPE_ALLOW;
+			continue;
+		}
+		else if (strcmp(line, "[disallow]") == 0)
+		{
+			type = ConnectionRules::TYPE_DISALLOW;
+			continue;
+		}
+		else if (strlen(line) == 0)
+		{
+			continue;
+		}
+
+		PortDir dir;
+
+		char *specifier;
+
+		if ((specifier = strstr(line, "<->")) != NULL)
+		{
+			dir = DIR_DUPLEX;
+		}
+		else if ((specifier = strstr(line, "->")) != NULL)
+		{
+			dir = DIR_OUTPUT;
+		}
+		else if ((specifier = strstr(line, "<-")) != NULL)
+		{
+			dir = DIR_INPUT;
+		}
+		else
+		{
+			fprintf(stderr, "Ignoring line %u, it's missing direction specifier!\n", i);
+			continue;
+		}
+
+		*specifier = '\0';
+
+		char *left = line;
+		left = trimWhiteSpace(left);
+
+		char *right = specifier + (dir == DIR_DUPLEX ? 3 : 2);
+		right = trimWhiteSpace(right);
+
+		switch (dir)
+		{
+		case DIR_DUPLEX:
+			rules.addRule(type, left, right);
+			if (strcmp(left, right) != 0)
+				rules.addRule(type, right, left);
+			break;
+		case DIR_INPUT:
+			rules.addRule(type, right, left);
+			break;
+		case DIR_OUTPUT:
+			rules.addRule(type, left, right);
+			break;
+		}
+
+		++i;
+	}
+
+	fclose(f);
+
+	return true;
+}
+
 int main(int argc, char **argv)
 {
 	if (argc == 2 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0))
@@ -575,6 +840,13 @@ int main(int argc, char **argv)
 	{
 		printUsage();
 		return 0;
+	}
+
+	parseRuleFile(g_rules, "/etc/amidiauto.conf");
+
+	if (!g_rules.hasRules())
+	{
+		g_rules.addRule(ConnectionRules::TYPE_ALLOW, "*", "*");
 	}
 
 	int result = run();
