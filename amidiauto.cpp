@@ -75,6 +75,7 @@ class ConnectionRules
 public:
 	enum Type
 	{
+		TYPE_UNKNOWN  = -1,
 		TYPE_ALLOW    = 0,
 		TYPE_DISALLOW = 1,
 	};
@@ -106,7 +107,7 @@ private:
 
 void ConnectionRules::addRule(Type type, const char * output, const char * input)
 {
-	if (!output || !input)
+	if (!output || !input || type == TYPE_UNKNOWN)
 		return;
 
 	if (strchr(output, '*') != NULL && strlen(output) > 1)
@@ -117,7 +118,7 @@ void ConnectionRules::addRule(Type type, const char * output, const char * input
 
 	rules_t &rules = type == TYPE_ALLOW ? m_allowRules : m_disallowRules;
 
-	fprintf(stderr, "Adding %s -> %s %s rule.\n", output, input, type == TYPE_ALLOW ? "allow" : "disallow");
+	fprintf(stderr, "%s '%s' -> '%s'\n", type == TYPE_ALLOW ? "Allowing" : "Disallowing", output, input);
 
 	rules.insert(std::make_pair(output, input));
 }
@@ -734,24 +735,23 @@ static char *trimWhiteSpace(char *str)
 	return str;
 }
 
-static bool parseRuleFile(ConnectionRules &rules, const char *fileName)
+static int parseRuleFile(ConnectionRules &rules, const char *fileName)
 {
 	if (!fileName)
-		return false;
+		return -EINVAL;
 
 	FILE *f = fopen(fileName, "rt");
 	if (!f)
-	{
-		fprintf(stderr, "Opening '%s' failed!\n", fileName);
-		return false;
-	}
+		return -ENOENT;
+
+	fprintf(stderr, "Reading rules in '%s'...\n", fileName);
 
 	enum { MAX_LENGTH = 1024 };
 	char l[MAX_LENGTH];
 
 	unsigned int i=0;
 
-	ConnectionRules::Type type = ConnectionRules::TYPE_ALLOW;
+	ConnectionRules::Type type = ConnectionRules::TYPE_UNKNOWN;
 
 	while (!feof(f) && fgets(l, MAX_LENGTH, f) != NULL)
 	{
@@ -760,19 +760,35 @@ static bool parseRuleFile(ConnectionRules &rules, const char *fileName)
 			*commentMarker = '\0'; // Cut the string at the beginning of a comment.
 
 		char *line = trimWhiteSpace(l);
+		++i;
 
-		if (strcmp(line, "[allow]") == 0)
+		if (strlen(line) == 0)
 		{
-			type = ConnectionRules::TYPE_ALLOW;
 			continue;
 		}
-		else if (strcmp(line, "[disallow]") == 0)
+		else if (line[0] == '[')
 		{
-			type = ConnectionRules::TYPE_DISALLOW;
-			continue;
+			if (strcmp(line+1, "allow]") == 0)
+			{
+				type = ConnectionRules::TYPE_ALLOW;
+				continue;
+			}
+			else if (strcmp(line+1, "disallow]") == 0)
+			{
+				type = ConnectionRules::TYPE_DISALLOW;
+				continue;
+			}
+			else
+			{
+				fprintf(stderr, "Unknown section on line %u!\n", i-1);
+				type = ConnectionRules::TYPE_UNKNOWN;
+				continue;
+			}
 		}
-		else if (strlen(line) == 0)
+
+		if (type == ConnectionRules::TYPE_UNKNOWN)
 		{
+			fprintf(stderr, "Ignoring line %u which is not within [allow] or [disallow] section!\n", i-1);
 			continue;
 		}
 
@@ -794,7 +810,7 @@ static bool parseRuleFile(ConnectionRules &rules, const char *fileName)
 		}
 		else
 		{
-			fprintf(stderr, "Ignoring line %u, it's missing direction specifier!\n", i);
+			fprintf(stderr, "Ignoring line %u, it's missing a direction specifier!\n", i);
 			continue;
 		}
 
@@ -805,6 +821,12 @@ static bool parseRuleFile(ConnectionRules &rules, const char *fileName)
 
 		char *right = specifier + (dir == DIR_DUPLEX ? 3 : 2);
 		right = trimWhiteSpace(right);
+
+		if (*left == '\0' || *right == '\0')
+		{
+			fprintf(stderr, "Ignoring line %u, it's incomplete!\n", i);
+			continue;
+		}
 
 		switch (dir)
 		{
@@ -820,13 +842,11 @@ static bool parseRuleFile(ConnectionRules &rules, const char *fileName)
 			rules.addRule(type, left, right);
 			break;
 		}
-
-		++i;
 	}
 
 	fclose(f);
 
-	return true;
+	return 0;
 }
 
 int main(int argc, char **argv)
@@ -842,14 +862,20 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	parseRuleFile(g_rules, "/etc/amidiauto.conf");
+	int result = parseRuleFile(g_rules, "/etc/amidiauto.conf");
+
+	if (result < 0)
+	{
+		fprintf(stderr, "Reading '/etc/amidiauto.conf' failed! (%d)\n", result);
+	}
 
 	if (!g_rules.hasRules())
 	{
+		printf("Using default 'allow all' rule.\n", result);
 		g_rules.addRule(ConnectionRules::TYPE_ALLOW, "*", "*");
 	}
 
-	int result = run();
+	result = run();
 
 	if (result < 0)
 		fprintf(stderr, "Error %d!\n", result);
