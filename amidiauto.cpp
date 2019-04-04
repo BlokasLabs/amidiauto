@@ -850,7 +850,7 @@ static int parseRuleFile(ConnectionRules &rules, const char *fileName)
 	return 0;
 }
 
-int main(int argc, char **argv)
+int main(int argc, char **argv, char **envp)
 {
 	if (argc == 2 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0))
 	{
@@ -863,11 +863,29 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	int result = parseRuleFile(g_rules, "/etc/amidiauto.conf");
+	int result = -ENOENT;
+	for (int i=0; envp[i] != NULL; ++i)
+	{
+		if (strncmp("AMIDIAUTO_CFG=", envp[i], 14) == 0)
+		{
+			const char *cfg = &envp[i][14];
+			result = parseRuleFile(g_rules, cfg);
+			if (result < 0)
+			{
+				fprintf(stderr, "Failed reading rules from $AMIDIAUTO_CFG='%s' (%d)\n", cfg, result);
+			}
+			break;
+		}
+	}
 
 	if (result < 0)
 	{
-		fprintf(stderr, "Reading '/etc/amidiauto.conf' failed! (%d)\n", result);
+		result = parseRuleFile(g_rules, "/etc/amidiauto.conf");
+
+		if (result < 0)
+		{
+			fprintf(stderr, "Reading '/etc/amidiauto.conf' failed! (%d)\n", result);
+		}
 	}
 
 	if (!g_rules.hasRules())
