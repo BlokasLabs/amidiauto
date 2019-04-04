@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <poll.h>
 
+#include <string>
 #include <map>
 #include <set>
 
