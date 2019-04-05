@@ -4,6 +4,7 @@ After=sound.target
 
 [Service]
 ExecStart=/usr/local/bin/amidiauto
+EnvironmentFile=/etc/environment
 
 [Install]
 WantedBy=multi-user.target

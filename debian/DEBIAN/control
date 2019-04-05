@@ -1,9 +1,9 @@
 Package: amidiauto
-Version: 1.01-1
+Version: 1.01-2
 Section: sound
 Priority: optional
 Architecture: armhf
 Depends: libc6 (>= 2.19), libgcc1 (>= 1:4.9.2-10), libasound2 (>= 1.1)
 Maintainer: Blokas Labs <hello@blokas.io>
-Description: ALSA MIDI autoconnect daemont.
+Description: ALSA MIDI autoconnect daemon.
  See https://github.com/BlokasLabs/amidiauto/ for more information.
